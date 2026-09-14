@@ -1,0 +1,52 @@
+name: Gold HAR Baseline (Weekly Refit)
+
+# รันทุกวันจันทร์ 08:00 เวลาไทย (= 01:00 UTC) -- เวลาเดียวกับรอบเช้าของ
+# Gold VRP Monitor เพื่อให้ log สองตัวเทียบช่วงเวลากันง่าย
+#
+# นี่คือ diagnostic log เท่านั้น ไม่ใช่ trading signal -- ตาม principle
+# scope discipline: ยังไม่ผูกเข้ากับ GOD.pine หรือ signal อื่นใด แค่สะสม
+# ข้อมูลไว้เทียบกับ gold_vrp_monitor.py ตามแผนเดิม
+on:
+  schedule:
+    - cron: "0 1 * * 1"  # จันทร์ 08:00 ICT
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "จำนวนปีย้อนหลังที่ใช้ fit (default 2)"
+        required: false
+        default: "2"
+
+permissions:
+  contents: write
+
+jobs:
+  refit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Gold HAR Baseline
+        env:
+          YEARS: ${{ github.event.inputs.years }}
+        run: |
+          Y="${YEARS:-2}"
+          python gold_har_baseline.py --years "$Y" \
+            --log-path gold_har_log.csv \
+            --coeffs-path gold_har_coeffs.txt
+
+      - name: Commit log + coefficients back to repo
+        run: |
+          git config user.name "gold-har-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add gold_har_log.csv gold_har_coeffs.txt
+          git diff --quiet --cached || git commit -m "gold_har_baseline: refit $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
