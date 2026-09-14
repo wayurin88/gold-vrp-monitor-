@@ -1,0 +1,7 @@
+# gold_har_baseline.py -- fit ล่าสุด 2026-09-14 (UTC)
+# copy ตัวเลขด้านล่างไปวางใน input ของ Gold HAR Forecast (Draft).pine ตามลำดับ
+b0=5.874943527e-05
+b1=0.5740241537
+b2=-0.008730740974
+b3=0.01599653487
+fitted_as_of=2026-09-14
