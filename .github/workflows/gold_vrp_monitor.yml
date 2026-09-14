@@ -1,0 +1,55 @@
+name: Gold VRP Monitor
+
+# รันอัตโนมัติวันละ 2 ครั้ง เวลาเดียวกับ BTC VRP Monitor เดิม (08:00 / 20:00 เวลาไทย = UTC+7)
+# cron ของ GitHub Actions ใช้เวลา UTC เสมอ -> 08:00 ICT = 01:00 UTC, 20:00 ICT = 13:00 UTC
+#
+# ต้องเป็น repo แบบ public ถึงจะให้ schedule event รันบน free tier ได้ (private repo
+# free tier ปิด schedule ไว้ ต้องอัปเป็น Pro ถึงจะใช้ได้) -- เหมือน pageth/Vol2VolData
+# เดิมที่เป็น public repo อยู่แล้ว วางสคริปต์ไว้ repo เดียวกันหรือ repo ใหม่ก็ได้
+on:
+  schedule:
+    - cron: "0 1 * * *"   # 08:00 ICT
+    - cron: "0 13 * * *"  # 20:00 ICT
+  workflow_dispatch:
+    inputs:
+      front_iv:
+        description: "ATM IV ของ weekly ใกล้สุดจาก QuikStrike (ค่อปจากคอลัมน์ ATM) -- เว้นว่างได้ถ้าไม่มี"
+        required: false
+        default: ""
+
+permissions:
+  contents: write  # ต้องมีสิทธิ์เขียนกลับเข้า repo เพื่อ commit ไฟล์ log
+
+jobs:
+  run-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Gold VRP Monitor
+        env:
+          FRONT_IV: ${{ github.event.inputs.front_iv }}
+        run: |
+          if [ -n "$FRONT_IV" ]; then
+            python gold_vrp_monitor.py --front-iv "$FRONT_IV" --log-path gold_vrp_log.csv
+          else
+            python gold_vrp_monitor.py --log-path gold_vrp_log.csv
+          fi
+
+      - name: Commit log back to repo
+        run: |
+          git config user.name "gold-vrp-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add gold_vrp_log.csv
+          # ไม่มีอะไรเปลี่ยน (เช่น Yahoo ล่ม/ดึงข้อมูลไม่ได้) -> ข้าม commit เงียบๆ ไม่ error
+          git diff --quiet --cached || git commit -m "gold_vrp_monitor: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
