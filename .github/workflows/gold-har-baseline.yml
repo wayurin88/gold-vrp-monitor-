@@ -1,14 +1,18 @@
-name: Gold HAR Baseline (Weekly Refit)
+name: Gold HAR Baseline (Daily)
 
-# รันทุกวันจันทร์ 08:00 เวลาไทย (= 01:00 UTC) -- เวลาเดียวกับรอบเช้าของ
-# Gold VRP Monitor เพื่อให้ log สองตัวเทียบช่วงเวลากันง่าย
+# [แก้ไข] เดิมตั้งไว้สัปดาห์ละครั้งเพราะคิดว่า HAR coefficient ไม่ควร refit
+# บ่อย -- แต่การ fit OLS ด้วยข้อมูล ~500 วันเบามาก (ไม่ถึงวินาที) ไม่มี
+# เหตุผลด้านต้นทุนที่ต้องรอเป็นสัปดาห์ และการมี log แค่สัปดาห์ละจุดเดียว
+# ทำให้เทียบกับ gold_vrp_monitor.py (ที่ log วันละ 2 ครั้ง) ไม่ได้เลย
+# ตอนนี้เปลี่ยนเป็นรันทุกวัน 08:00 ไทย (= 01:00 UTC) เวลาเดียวกับรอบเช้า
+# ของ VRP Monitor เพื่อให้ log สองตัวเทียบวันต่อวันกันได้ตรงๆ
 #
 # นี่คือ diagnostic log เท่านั้น ไม่ใช่ trading signal -- ตาม principle
 # scope discipline: ยังไม่ผูกเข้ากับ GOD.pine หรือ signal อื่นใด แค่สะสม
 # ข้อมูลไว้เทียบกับ gold_vrp_monitor.py ตามแผนเดิม
 on:
   schedule:
-    - cron: "0 1 * * 1"  # จันทร์ 08:00 ICT
+    - cron: "0 1 * * *"  # ทุกวัน 08:00 ICT
   workflow_dispatch:
     inputs:
       years:
