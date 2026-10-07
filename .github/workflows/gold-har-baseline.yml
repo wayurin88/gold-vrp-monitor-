@@ -49,11 +49,15 @@ jobs:
             --log-path gold_har_log.csv \
             --coeffs-path gold_har_coeffs.txt
 
+      # H5 (docs/strategies/H5_har_gvz_combo.md): combo (HAR+GVZ)/2 vs HAR, GVZ
+      - name: H5 evaluation
+        run: python h5_har_eval.py --log gold_har_log.csv --out h5
+
       - name: Commit log + coefficients back to repo
         run: |
           git config user.name "gold-har-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add gold_har_log.csv gold_har_coeffs.txt
+          git add gold_har_log.csv gold_har_coeffs.txt h5
           git diff --quiet --cached && exit 0
           git commit -m "gold_har_baseline: refit $(date -u +%Y-%m-%dT%H:%MZ)"
           git pull --rebase origin "${GITHUB_REF_NAME}"
