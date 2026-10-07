@@ -133,7 +133,7 @@ def write_log(path: str, now: datetime, row: dict) -> None:
         if write_header:
             writer.writerow([
                 "timestamp_utc", "last_bar_date", "years", "n_obs", "r2", "b0", "b1", "b2", "b3",
-                "today_vol_pct", "forecast_vol_pct", "gvz", "gap_gvz_forecast", "partial_bar",
+                "today_vol_pct", "forecast_vol_pct", "gvz", "gap_gvz_forecast", "partial_bar", "source",
             ])
 
         def fmt(v, sig=6):
@@ -143,7 +143,7 @@ def write_log(path: str, now: datetime, row: dict) -> None:
             now.isoformat(), row["last_bar_date"], row["years"], row["n_obs"], fmt(row["r2"], 4),
             fmt(row["b0"]), fmt(row["b1"], 4), fmt(row["b2"], 4), fmt(row["b3"], 4),
             fmt(row["today_vol_pct"], 4), fmt(row["forecast_vol_pct"], 4),
-            fmt(row["gvz"], 4), fmt(row["gap"], 4), 0,
+            fmt(row["gvz"], 4), fmt(row["gap"], 4), 0, "live",
         ])
     print(f"บันทึก log แล้วที่ {os.path.abspath(path)}")
 

@@ -161,7 +161,7 @@ def write_log(path: str, now: datetime, r: dict) -> None:
             writer.writerow([
                 "timestamp_utc", "last_bar_date", "gc_close", "gvz", "rv7", "rv30", "parkinson7",
                 "front_iv_manual", "gap_gvz_rv30", "gap_gvz_rv7", "gap_gvz_pk7", "gap_front_rv7",
-                "partial_bar",
+                "partial_bar", "source",
             ])
 
         def fmt(v):
@@ -170,7 +170,7 @@ def write_log(path: str, now: datetime, r: dict) -> None:
         writer.writerow([
             now.isoformat(), r["last_bar_date"], fmt(r["gc_close"]), fmt(r["gvz"]), fmt(r["rv7"]),
             fmt(r["rv30"]), fmt(r["pk7"]), fmt(r["front_iv"]), fmt(r["gap_rv30"]), fmt(r["gap_rv7"]),
-            fmt(r["gap_pk7"]), fmt(r["gap_front"]), 0,
+            fmt(r["gap_pk7"]), fmt(r["gap_front"]), 0, "live",
         ])
     print(f"บันทึกแล้วที่ {os.path.abspath(path)}")
 
