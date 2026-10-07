@@ -1,7 +1,8 @@
 """
 gold_har_baseline.py  --  DIAGNOSTIC เท่านั้น ยังไม่ใช่ trading signal
 
-รันอัตโนมัติทุกสัปดาห์ผ่าน gold-har-baseline.yml (weekly cron) เพื่อ refit
+รันอัตโนมัติวันละครั้งหลังตลาดปิด (.github/workflows/gold-har-baseline.yml) เพื่อ refit
+ใช้เฉพาะแท่งรายวันที่จบแล้ว (gold_bars.py) และไม่ log ซ้ำถ้ายังไม่มีแท่งใหม่
 coefficient + สะสม log ไว้เทียบกับ gold_vrp_monitor.py ตามแผนเดิม (ถ้า
 RV7/RV30/Parkinson ธรรมดาก็อ่านออกพอแล้ว ก็ยังไม่มีเหตุผลต้องเอา HAR ไป
 ผูกเป็น signal จริง -- ตัวนี้แค่เก็บ log คู่ขนานไว้เทียบดูก่อน)
@@ -38,6 +39,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+
+from gold_bars import completed_bars, last_logged_bar
 
 try:
     import yfinance as yf
@@ -113,8 +116,11 @@ def variance_to_annual_vol_pct(var: float) -> float:
     return float(np.sqrt(var * TRADING_DAYS_PER_YEAR) * 100.0)
 
 
-def fetch_gvz_last(period: str) -> float:
+def fetch_gvz_last(period: str, as_of: pd.Timestamp) -> float:
     df = fetch_price_history(GVZ_TICKER, period)
+    df = df[df.index <= as_of]
+    if df.empty:
+        raise RuntimeError(f"ไม่มี GVZ ถึงวันที่ {as_of:%Y-%m-%d}")
     return float(df["Close"].iloc[-1])
 
 
@@ -126,18 +132,18 @@ def write_log(path: str, now: datetime, row: dict) -> None:
         writer = csv.writer(f)
         if write_header:
             writer.writerow([
-                "timestamp_utc", "years", "n_obs", "r2", "b0", "b1", "b2", "b3",
-                "today_vol_pct", "forecast_vol_pct", "gvz", "gap_gvz_forecast",
+                "timestamp_utc", "last_bar_date", "years", "n_obs", "r2", "b0", "b1", "b2", "b3",
+                "today_vol_pct", "forecast_vol_pct", "gvz", "gap_gvz_forecast", "partial_bar",
             ])
 
         def fmt(v, sig=6):
             return "" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.{sig}g}"
 
         writer.writerow([
-            now.isoformat(), row["years"], row["n_obs"], fmt(row["r2"], 4),
+            now.isoformat(), row["last_bar_date"], row["years"], row["n_obs"], fmt(row["r2"], 4),
             fmt(row["b0"]), fmt(row["b1"], 4), fmt(row["b2"], 4), fmt(row["b3"], 4),
             fmt(row["today_vol_pct"], 4), fmt(row["forecast_vol_pct"], 4),
-            fmt(row["gvz"], 4), fmt(row["gap"], 4),
+            fmt(row["gvz"], 4), fmt(row["gap"], 4), 0,
         ])
     print(f"บันทึก log แล้วที่ {os.path.abspath(path)}")
 
@@ -164,7 +170,7 @@ def write_coeffs_file(path: str, now: datetime, coeffs: np.ndarray) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Gold HAR baseline -- DRAFT, ยังไม่ควรตั้ง schedule")
+    parser = argparse.ArgumentParser(description="Gold HAR baseline -- DRAFT, diagnostic เท่านั้น")
     parser.add_argument("--years", type=int, default=2,
                          help="จำนวนปีย้อนหลังที่ใช้ fit HAR (default 2 -- ยิ่งยาวยิ่งเสถียรแต่ปรับตัวช้าลง)")
     parser.add_argument("--no-gvz", action="store_true", help="ข้ามการดึง GVZ มาเทียบ")
@@ -173,10 +179,13 @@ def main():
     parser.add_argument("--coeffs-path", type=str, default="gold_har_coeffs.txt",
                          help="ไฟล์ text เก็บ coefficient ล่าสุด สำหรับ copy เข้า Pine (เขียนทับทุกครั้ง ไม่ append)")
     parser.add_argument("--no-log", action="store_true", help="แค่พิมพ์รายงาน ไม่เขียนไฟล์ log/coeffs (ใช้ตอนทดสอบ)")
+    parser.add_argument("--force", action="store_true", help="log แม้แท่งล่าสุดจะเคย log แล้ว")
     args = parser.parse_args()
 
     period = f"{args.years}y"
-    price = fetch_price_history(GOLD_FUTURES_TICKER, period)
+    now = datetime.now(timezone.utc)
+    price = completed_bars(fetch_price_history(GOLD_FUTURES_TICKER, period), now)
+    last_bar = f"{price.index[-1]:%Y-%m-%d}"
     rv = parkinson_daily_variance(price["High"], price["Low"]).dropna()
 
     n_obs = len(rv)
@@ -200,14 +209,14 @@ def main():
     gvz = float("nan")
     if not args.no_gvz:
         try:
-            gvz = fetch_gvz_last(period)
+            gvz = fetch_gvz_last(period, price.index[-1])
         except RuntimeError as e:
             print(f"⚠️  {e}")
 
-    now = datetime.now(timezone.utc)
     print("=" * 62)
     print(f"Gold HAR Baseline (DRAFT) -- {now:%Y-%m-%d %H:%M} UTC")
     print("=" * 62)
+    print(f"แท่งล่าสุดที่จบ : {last_bar}")
     print(f"Fit บนข้อมูล {len(feat)} วัน (จาก {args.years} ปีย้อนหลัง, Parkinson daily variance)")
     print(f"R^2 ของ in-sample fit : {r2:.3f}")
     print(f"Coefficients: b0={b0:.6g}  b1(daily)={b1:.3f}  b2(weekly)={b2:.3f}  b3(monthly)={b3:.3f}")
@@ -221,9 +230,13 @@ def main():
     print("⚠️  DRAFT เท่านั้น -- coefficient/threshold ยังไม่ผ่าน validation ใดๆ "
           "ห้ามใช้ตัดสินใจเทรดตรงๆ")
 
-    if not args.no_log:
+    if args.no_log:
+        pass
+    elif not args.force and last_logged_bar(args.log_path) == last_bar:
+        print(f"แท่ง {last_bar} log ไว้แล้ว -- ไม่ log ซ้ำ")
+    else:
         write_log(args.log_path, now, {
-            "years": args.years, "n_obs": len(feat), "r2": r2,
+            "last_bar_date": last_bar, "years": args.years, "n_obs": len(feat), "r2": r2,
             "b0": b0, "b1": b1, "b2": b2, "b3": b3,
             "today_vol_pct": today_vol_pct, "forecast_vol_pct": forecast_vol_pct,
             "gvz": gvz, "gap": gvz - forecast_vol_pct if not np.isnan(gvz) else float("nan"),

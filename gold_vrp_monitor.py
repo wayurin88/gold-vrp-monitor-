@@ -25,8 +25,9 @@ manual-paste pipeline เลย
     python gold_vrp_monitor.py --front-iv 15.69
     python gold_vrp_monitor.py --log-path C:\\Trading\\Vol2VolData\\gold_vrp_log.csv
 
-ตั้ง Windows Task Scheduler ให้รันวันละ 2 ครั้งแบบเดียวกับ BTC VRP Monitor
-ได้เลย -- ไม่มี dependency กับ Tampermonkey/CME feed ใดๆ
+ใช้เฉพาะแท่งรายวันที่จบแล้ว (เลย 17:00 ET) ดู gold_bars.py -- รันวันละครั้งหลังตลาดปิด
+ผ่าน GitHub Actions ถ้ายังไม่มีแท่งใหม่จะไม่ log ซ้ำ (ใส่ --force เพื่อ log ทุกครั้ง)
+ไม่มี dependency กับ Tampermonkey/CME feed ใดๆ
 """
 
 import argparse
@@ -37,6 +38,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+
+from gold_bars import completed_bars, last_logged_bar
 
 try:
     import yfinance as yf
@@ -81,9 +84,12 @@ def parkinson_vol(high: pd.Series, low: pd.Series, window: int) -> float:
     return float(np.sqrt(variance) * np.sqrt(TRADING_DAYS_PER_YEAR) * 100.0)
 
 
-def fetch_gvz(days: int) -> float:
-    """ดึง GVZ ปิดล่าสุด -- proxy ของ 30-day ATM IV (ดู caveat ในหัวไฟล์)"""
+def fetch_gvz(days: int, as_of: pd.Timestamp) -> float:
+    """GVZ ปิดของวันเดียวกับแท่ง GC ล่าสุด (หรือก่อนหน้า) -- proxy ของ 30-day ATM IV (ดู caveat ในหัวไฟล์)"""
     df = fetch_price_history(GVZ_TICKER, days)
+    df = df[df.index <= as_of]
+    if df.empty:
+        raise RuntimeError(f"ไม่มี GVZ ถึงวันที่ {as_of:%Y-%m-%d}")
     return float(df["Close"].iloc[-1])
 
 
@@ -112,6 +118,7 @@ def build_report(price: pd.DataFrame, gvz: float, front_iv: float | None) -> dic
         gap_front = front_iv - rv7 if not np.isnan(rv7) else float("nan")
 
     return {
+        "last_bar_date": f"{price.index[-1]:%Y-%m-%d}",
         "gc_close": float(price["Close"].iloc[-1]),
         "gvz": gvz,
         "rv7": rv7,
@@ -129,6 +136,7 @@ def print_report(r: dict, now: datetime) -> None:
     print("=" * 60)
     print(f"Gold VRP Monitor -- {now:%Y-%m-%d %H:%M} UTC")
     print("=" * 60)
+    print(f"แท่งล่าสุดที่จบ : {r['last_bar_date']}")
     print(f"GC last close   : {r['gc_close']:.2f}")
     print(f"GVZ (30D IV)    : {r['gvz']:.2f}%" if not np.isnan(r["gvz"]) else "GVZ             : N/A (ดึงไม่สำเร็จ)")
     print(f"RV7             : {r['rv7']:.2f}%")
@@ -151,17 +159,18 @@ def write_log(path: str, now: datetime, r: dict) -> None:
         writer = csv.writer(f)
         if write_header:
             writer.writerow([
-                "timestamp_utc", "gc_close", "gvz", "rv7", "rv30", "parkinson7",
+                "timestamp_utc", "last_bar_date", "gc_close", "gvz", "rv7", "rv30", "parkinson7",
                 "front_iv_manual", "gap_gvz_rv30", "gap_gvz_rv7", "gap_gvz_pk7", "gap_front_rv7",
+                "partial_bar",
             ])
 
         def fmt(v):
             return "" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.2f}"
 
         writer.writerow([
-            now.isoformat(), fmt(r["gc_close"]), fmt(r["gvz"]), fmt(r["rv7"]), fmt(r["rv30"]),
-            fmt(r["pk7"]), fmt(r["front_iv"]), fmt(r["gap_rv30"]), fmt(r["gap_rv7"]),
-            fmt(r["gap_pk7"]), fmt(r["gap_front"]),
+            now.isoformat(), r["last_bar_date"], fmt(r["gc_close"]), fmt(r["gvz"]), fmt(r["rv7"]),
+            fmt(r["rv30"]), fmt(r["pk7"]), fmt(r["front_iv"]), fmt(r["gap_rv30"]), fmt(r["gap_rv7"]),
+            fmt(r["gap_pk7"]), fmt(r["gap_front"]), 0,
         ])
     print(f"บันทึกแล้วที่ {os.path.abspath(path)}")
 
@@ -185,20 +194,30 @@ def main():
         "--no-log", action="store_true",
         help="แค่พิมพ์รายงาน ไม่เขียนลง CSV (ใช้ตอนทดสอบ)",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="log แม้แท่งล่าสุดจะเคย log แล้ว (เช่นใส่ --front-iv เพิ่มทีหลัง)",
+    )
     args = parser.parse_args()
 
-    price = fetch_price_history(GOLD_FUTURES_TICKER, args.history_days)
+    now = datetime.now(timezone.utc)
+    price = completed_bars(fetch_price_history(GOLD_FUTURES_TICKER, args.history_days), now)
+    if price.empty:
+        raise RuntimeError("ไม่มีแท่ง GC ที่จบแล้ว")
     try:
-        gvz = fetch_gvz(args.history_days)
+        gvz = fetch_gvz(args.history_days, price.index[-1])
     except RuntimeError as e:
         print(f"⚠️  {e}")
         gvz = float("nan")
 
     report = build_report(price, gvz, args.front_iv)
-    now = datetime.now(timezone.utc)
     print_report(report, now)
 
-    if not args.no_log:
+    if args.no_log:
+        pass
+    elif not args.force and last_logged_bar(args.log_path) == report["last_bar_date"]:
+        print(f"แท่ง {report['last_bar_date']} log ไว้แล้ว -- ไม่ log ซ้ำ")
+    else:
         write_log(args.log_path, now, report)
 
 

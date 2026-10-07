@@ -1,18 +1,15 @@
 name: Gold HAR Baseline (Daily)
 
-# [แก้ไข] เดิมตั้งไว้สัปดาห์ละครั้งเพราะคิดว่า HAR coefficient ไม่ควร refit
-# บ่อย -- แต่การ fit OLS ด้วยข้อมูล ~500 วันเบามาก (ไม่ถึงวินาที) ไม่มี
-# เหตุผลด้านต้นทุนที่ต้องรอเป็นสัปดาห์ และการมี log แค่สัปดาห์ละจุดเดียว
-# ทำให้เทียบกับ gold_vrp_monitor.py (ที่ log วันละ 2 ครั้ง) ไม่ได้เลย
-# ตอนนี้เปลี่ยนเป็นรันทุกวัน 08:00 ไทย (= 01:00 UTC) เวลาเดียวกับรอบเช้า
-# ของ VRP Monitor เพื่อให้ log สองตัวเทียบวันต่อวันกันได้ตรงๆ
+# refit ทุกวันหลังตลาดปิด 22:47 UTC จ.–ศ. (05:47 น. ไทย) -- 10 นาทีหลัง VRP Monitor
+# ใช้แท่งชุดเดียวกัน log สองตัวจึงเทียบวันต่อวันได้ตรงๆ (คอลัมน์ last_bar_date)
+# OLS บนข้อมูล ~500 วันใช้เวลาไม่ถึงวินาที refit รายวันจึงไม่มีต้นทุน
 #
 # นี่คือ diagnostic log เท่านั้น ไม่ใช่ trading signal -- ตาม principle
 # scope discipline: ยังไม่ผูกเข้ากับ GOD.pine หรือ signal อื่นใด แค่สะสม
 # ข้อมูลไว้เทียบกับ gold_vrp_monitor.py ตามแผนเดิม
 on:
   schedule:
-    - cron: "0 1 * * *"  # ทุกวัน 08:00 ICT
+    - cron: "47 22 * * 1-5"
   workflow_dispatch:
     inputs:
       years:
@@ -20,12 +17,17 @@ on:
         required: false
         default: "2"
 
+concurrency:
+  group: gold-vrp-commit   # สอง workflow push เข้า main เดียวกัน ห้ามรันซ้อน
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
   refit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -52,5 +54,7 @@ jobs:
           git config user.name "gold-har-bot"
           git config user.email "actions@users.noreply.github.com"
           git add gold_har_log.csv gold_har_coeffs.txt
-          git diff --quiet --cached || git commit -m "gold_har_baseline: refit $(date -u +%Y-%m-%dT%H:%MZ)"
+          git diff --quiet --cached && exit 0
+          git commit -m "gold_har_baseline: refit $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
